@@ -7,3 +7,4 @@ add_compile_options(-Wall -Wextra)
 
 add_executable(test_pager pager.cpp main.cpp)
 add_executable(run_tests pager.cpp tests.cpp)
+add_executable(run_bp_tests pager.cpp buffer_pool.cpp test_buffer_pool.cpp)
