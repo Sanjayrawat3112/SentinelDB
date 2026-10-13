@@ -20,3 +20,9 @@ bool pageRemove(void* page, uint64_t key);
 
 // Bytes available for a new record (after compaction), including its slot.
 size_t pageFreeSpace(const void* page);
+
+
+// "An insert skipped past this page." Used by the hash store's probing.
+// The flag is never cleared by pageRemove: it works like a tombstone.
+void pageSetOverflowed(void* page);
+bool pageIsOverflowed(const void* page);

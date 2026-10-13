@@ -108,3 +108,12 @@ bool pageRemove(void* page, uint64_t key) {
     }
     return false;
 }
+
+
+void pageSetOverflowed(void* page) {
+    hdr(page)->flags |= PAGE_FLAG_OVERFLOWED;
+}
+
+bool pageIsOverflowed(const void* page) {
+    return (hdr(page)->flags & PAGE_FLAG_OVERFLOWED) != 0;
+}

@@ -56,7 +56,20 @@ int main() {
     pageInit(buf);
     CHECK(pageInsert(buf, 5, "") && pageGet(buf, 5, out) && out.empty(), "empty value works");
 
+        std::printf("Overflow flag\n");
+    pageInit(buf);
+    CHECK(!pageIsOverflowed(buf), "fresh page is not flagged");
+    pageSetOverflowed(buf);
+    CHECK(pageIsOverflowed(buf), "flag is set after pageSetOverflowed");
+    pageInsert(buf, 1, "a");
+    pageRemove(buf, 1);
+    CHECK(pageIsOverflowed(buf), "flag survives insert and remove");
+    CHECK(pageGet(buf, 1, out) == false, "flag does not affect record lookup");
+
     if (failures == 0) { std::printf("\nAll page_ops tests passed.\n"); return 0; }
     std::printf("\n%d test(s) FAILED.\n", failures);
     return 1;
 }
+
+
+
