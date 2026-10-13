@@ -11,3 +11,6 @@ add_executable(run_bp_tests pager.cpp buffer_pool.cpp test_buffer_pool.cpp)
 # Storage engine (Teammate A)
 add_executable(page_ops_tests storage_engine/page_ops.cpp storage_engine/test_page_ops.cpp)
 target_include_directories(page_ops_tests PRIVATE ${CMAKE_SOURCE_DIR})
+
+add_executable(kv_store_tests pager.cpp buffer_pool.cpp storage_engine/page_ops.cpp storage_engine/kv_store.cpp storage_engine/test_kv_store.cpp)
+target_include_directories(kv_store_tests PRIVATE ${CMAKE_SOURCE_DIR})
