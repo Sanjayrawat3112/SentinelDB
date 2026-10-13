@@ -10,11 +10,15 @@ enum PageType : uint16_t {
     PAGE_DATA = 1    // holds records
 };
 
+// Bit in PageHeader::flags.
+constexpr uint16_t PAGE_FLAG_OVERFLOWED = 1;
+
 // Sits at byte 0 of every page.
 struct PageHeader {
     uint16_t pageType;
     uint16_t slotCount;      // number of slot entries (deleted ones included)
     uint16_t freeSpacePtr;   // offset where the record area starts; grows downward
+    uint16_t flags;          // bit 0: an insert skipped past this page (PAGE_FLAG_OVERFLOWED)
 };
 
 // One entry per record, stored right after the header.
@@ -26,5 +30,5 @@ struct Slot {
 // Record layout at 'offset': [uint64_t key][uint16_t valueLen][value bytes]
 constexpr size_t RECORD_HEADER_SIZE = sizeof(uint64_t) + sizeof(uint16_t);
 
-static_assert(sizeof(PageHeader) == 6, "PageHeader must be 6 bytes");
+static_assert(sizeof(PageHeader) == 8, "PageHeader must be 8 bytes");
 static_assert(sizeof(Slot) == 4, "Slot must be 4 bytes");
