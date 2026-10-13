@@ -117,3 +117,13 @@ void pageSetOverflowed(void* page) {
 bool pageIsOverflowed(const void* page) {
     return (hdr(page)->flags & PAGE_FLAG_OVERFLOWED) != 0;
 }
+
+
+void pageCollect(const void* page, std::vector<std::pair<uint64_t, std::string>>& out) {
+    const Slot* sl = slots(page);
+    for (uint16_t i = 0; i < hdr(page)->slotCount; i++) {
+        if (sl[i].offset == 0) continue;
+        const char* v = static_cast<const char*>(page) + sl[i].offset + RECORD_HEADER_SIZE;
+        out.emplace_back(recKey(page, sl[i]), std::string(v, recValLen(page, sl[i])));
+    }
+}

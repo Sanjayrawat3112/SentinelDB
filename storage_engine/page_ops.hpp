@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 // Operations on ONE 4096-byte page held in a plain memory buffer.
 // These functions know nothing about the Buffer Pool or the disk.
@@ -21,8 +23,10 @@ bool pageRemove(void* page, uint64_t key);
 // Bytes available for a new record (after compaction), including its slot.
 size_t pageFreeSpace(const void* page);
 
-
 // "An insert skipped past this page." Used by the hash store's probing.
 // The flag is never cleared by pageRemove: it works like a tombstone.
 void pageSetOverflowed(void* page);
 bool pageIsOverflowed(const void* page);
+
+// Copies every live record of the page into 'out' (appends).
+void pageCollect(const void* page, std::vector<std::pair<uint64_t, std::string>>& out);
