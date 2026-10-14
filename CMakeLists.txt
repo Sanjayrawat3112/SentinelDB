@@ -14,3 +14,6 @@ target_include_directories(page_ops_tests PRIVATE ${CMAKE_SOURCE_DIR})
 
 add_executable(kv_store_tests pager.cpp buffer_pool.cpp storage_engine/page_ops.cpp storage_engine/kv_store.cpp storage_engine/test_kv_store.cpp)
 target_include_directories(kv_store_tests PRIVATE ${CMAKE_SOURCE_DIR})
+
+add_executable(wal_tests storage_engine/wal.cpp storage_engine/test_wal.cpp)
+target_include_directories(wal_tests PRIVATE ${CMAKE_SOURCE_DIR})
