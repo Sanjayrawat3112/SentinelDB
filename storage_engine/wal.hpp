@@ -46,6 +46,9 @@ public:
     // Reads every valid record from the start of the file.
     std::vector<LogRecord> readAll() const;
 
+        // The LSN the next append() will get.
+    uint64_t nextLsn() const { return nextLsn_; }
+
 private:
     int fd_;
     uint64_t nextLsn_;

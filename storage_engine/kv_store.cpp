@@ -1,6 +1,7 @@
 #include "storage_engine/kv_store.hpp"
 #include "storage_engine/page_format.hpp"
 #include "storage_engine/page_ops.hpp"
+#include "storage_engine/wal.hpp"
 #include "buffer_pool.hpp"
 #include <stdexcept>
 #include <utility>
@@ -32,6 +33,8 @@ private:
 } // namespace
 
 KVStore::KVStore(BufferPool& pool, size_t numPages) : pool_(pool), numPages_(numPages) {}
+
+KVStore::~KVStore() = default;
 
 size_t KVStore::homePage(uint64_t key) const {
     uint64_t x = key;                       // splitmix64 finalizer: spreads similar keys apart
@@ -66,7 +69,7 @@ bool KVStore::place(uint64_t key, const std::string& value) {
     return false;
 }
 
-bool KVStore::insert(uint64_t key, const std::string& value) {
+bool KVStore::applyInsert(uint64_t key, const std::string& value) {
     if (value.size() > MAX_VALUE_SIZE) return false;
 
     std::string oldValue;
@@ -90,7 +93,7 @@ bool KVStore::get(uint64_t key, std::string& outValue) {
     return find(key, outValue) != numPages_;
 }
 
-bool KVStore::remove(uint64_t key) {
+bool KVStore::applyRemove(uint64_t key) {
     std::string tmp;
     size_t at = find(key, tmp);
     if (at == numPages_) return false;
@@ -109,4 +112,125 @@ void KVStore::scan(const std::function<void(uint64_t, const std::string&)>& call
         }                                         // page unpinned before callbacks run
         for (const auto& r : records) callback(r.first, r.second);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Public operations: plain, or logged when a WAL is enabled.
+// ---------------------------------------------------------------------------
+
+bool KVStore::insert(uint64_t key, const std::string& value) {
+    if (value.size() > MAX_VALUE_SIZE) return false;
+    if (!wal_) return applyInsert(key, value);
+
+    std::string before;
+    bool had = find(key, before) != numPages_;
+    return loggedChange(key, had, before, true, value);
+}
+
+bool KVStore::remove(uint64_t key) {
+    if (!wal_) return applyRemove(key);
+
+    std::string before;
+    if (find(key, before) == numPages_) return false;
+    return loggedChange(key, true, before, false, std::string());
+}
+
+// ---------------------------------------------------------------------------
+// WAL and transactions
+// ---------------------------------------------------------------------------
+
+void KVStore::requireWal() const {
+    if (!wal_) throw std::logic_error("KVStore: call enableWal() first");
+}
+
+void KVStore::enableWal(const std::string& walPath) {
+    if (wal_) throw std::logic_error("KVStore: WAL already enabled");
+    wal_.reset(new Wal(walPath));
+}
+
+uint64_t KVStore::begin() {
+    requireWal();
+    if (activeTxn_ != 0) throw std::logic_error("KVStore: a transaction is already active");
+    LogRecord r;
+    r.type = LogType::BEGIN;
+    r.txnId = wal_->nextLsn();          // the BEGIN record's LSN doubles as the transaction id
+    activeTxn_ = r.txnId;
+    wal_->append(r);
+    return activeTxn_;
+}
+
+void KVStore::commit() {
+    requireWal();
+    if (activeTxn_ == 0) throw std::logic_error("KVStore: no active transaction");
+    LogRecord r;
+    r.type = LogType::COMMIT;
+    r.txnId = activeTxn_;
+    wal_->append(r);
+    wal_->flush();                      // the transaction is durable once this returns
+    activeTxn_ = 0;
+    undoLog_.clear();
+}
+
+// Logs one change, THEN applies it to the pages (the write-ahead rule).
+bool KVStore::loggedChange(uint64_t key, bool hasBefore, const std::string& before,
+                           bool hasAfter, const std::string& after) {
+    bool autocommit = (activeTxn_ == 0);
+    if (autocommit) begin();
+
+    LogRecord r;
+    r.type = LogType::CHANGE;
+    r.txnId = activeTxn_;
+    r.key = key;
+    r.hasBefore = hasBefore;  r.before = before;
+    r.hasAfter = hasAfter;    r.after = after;
+    wal_->append(r);
+    wal_->flush();                      // log is on disk BEFORE any page is touched
+
+    bool ok = hasAfter ? applyInsert(key, after) : applyRemove(key);
+    if (ok) {
+        undoLog_.push_back(Change{key, hasBefore, before, hasAfter, after});
+    } else {
+        // The store had no room, so nothing changed. Log the opposite change so a
+        // later redo of the log ends up with the same state as the live store.
+        LogRecord c = r;
+        c.hasBefore = r.hasAfter;  c.before = r.after;
+        c.hasAfter = r.hasBefore;  c.after = r.before;
+        wal_->append(c);
+    }
+
+    if (autocommit) commit();
+    return ok;
+}
+
+void KVStore::abort() {
+    requireWal();
+    if (activeTxn_ == 0) throw std::logic_error("KVStore: no active transaction");
+
+    // Undo is logged as ordinary changes ("compensation"), newest first, so that
+    // recovery can simply repeat the log and reach the same state.
+    for (size_t i = undoLog_.size(); i-- > 0;) {
+        const Change& c = undoLog_[i];
+        LogRecord r;
+        r.type = LogType::CHANGE;
+        r.txnId = activeTxn_;
+        r.key = c.key;
+        r.hasBefore = c.hasAfter;  r.before = c.after;
+        r.hasAfter = c.hasBefore;  r.after = c.before;
+        wal_->append(r);
+    }
+    wal_->flush();                      // log first, then touch the pages
+
+    for (size_t i = undoLog_.size(); i-- > 0;) {
+        const Change& c = undoLog_[i];
+        if (c.hasBefore) applyInsert(c.key, c.before);
+        else applyRemove(c.key);
+    }
+
+    LogRecord a;
+    a.type = LogType::ABORT;
+    a.txnId = activeTxn_;
+    wal_->append(a);
+    wal_->flush();
+    activeTxn_ = 0;
+    undoLog_.clear();
 }
