@@ -1,2 +1,4 @@
 build/
 disk.img
+*.img
+*.log
