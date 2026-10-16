@@ -3,7 +3,9 @@
 #include "storage_engine/page_ops.hpp"
 #include "storage_engine/wal.hpp"
 #include "buffer_pool.hpp"
+#include <algorithm>
 #include <stdexcept>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -202,17 +204,15 @@ bool KVStore::loggedChange(uint64_t key, bool hasBefore, const std::string& befo
     return ok;
 }
 
-void KVStore::abort() {
-    requireWal();
-    if (activeTxn_ == 0) throw std::logic_error("KVStore: no active transaction");
-
-    // Undo is logged as ordinary changes ("compensation"), newest first, so that
-    // recovery can simply repeat the log and reach the same state.
-    for (size_t i = undoLog_.size(); i-- > 0;) {
-        const Change& c = undoLog_[i];
+// Undoes 'changes' (newest first) and finishes the transaction with an ABORT record.
+// The undo is logged as ordinary changes ("compensation") so that recovery can
+// simply repeat the log and reach the same state.
+void KVStore::rollback(uint64_t txnId, const std::vector<Change>& changes) {
+    for (size_t i = changes.size(); i-- > 0;) {
+        const Change& c = changes[i];
         LogRecord r;
         r.type = LogType::CHANGE;
-        r.txnId = activeTxn_;
+        r.txnId = txnId;
         r.key = c.key;
         r.hasBefore = c.hasAfter;  r.before = c.after;
         r.hasAfter = c.hasBefore;  r.after = c.before;
@@ -220,17 +220,106 @@ void KVStore::abort() {
     }
     wal_->flush();                      // log first, then touch the pages
 
-    for (size_t i = undoLog_.size(); i-- > 0;) {
-        const Change& c = undoLog_[i];
+    for (size_t i = changes.size(); i-- > 0;) {
+        const Change& c = changes[i];
         if (c.hasBefore) applyInsert(c.key, c.before);
         else applyRemove(c.key);
     }
 
     LogRecord a;
     a.type = LogType::ABORT;
-    a.txnId = activeTxn_;
+    a.txnId = txnId;
     wal_->append(a);
     wal_->flush();
+}
+
+void KVStore::abort() {
+    requireWal();
+    if (activeTxn_ == 0) throw std::logic_error("KVStore: no active transaction");
+    rollback(activeTxn_, undoLog_);
     activeTxn_ = 0;
     undoLog_.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Checkpoint and crash recovery
+// ---------------------------------------------------------------------------
+
+void KVStore::checkpoint() {
+    requireWal();
+    if (activeTxn_ != 0) throw std::logic_error("KVStore: cannot checkpoint during a transaction");
+    pool_.evictAll();                   // every dirty page goes to the data file
+    wal_->truncate();                   // the old log is no longer needed
+    LogRecord r;
+    r.type = LogType::CHECKPOINT;
+    wal_->append(r);
+    wal_->flush();
+}
+
+// Removes every stored copy of the given keys, wherever probing may have put them.
+void KVStore::purgeKeys(const std::unordered_set<uint64_t>& keys) {
+    for (size_t id = 0; id < numPages_; id++) {
+        PinnedPage pg(pool_, id);
+        std::vector<std::pair<uint64_t, std::string>> recs;
+        pageCollect(pg.get(), recs);
+        bool changed = false;
+        for (const auto& r : recs)
+            if (keys.count(r.first) && pageRemove(pg.get(), r.first)) changed = true;
+        if (changed) pg.markDirty();
+    }
+}
+
+RecoveryReport KVStore::recover() {
+    requireWal();
+    if (activeTxn_ != 0) throw std::logic_error("KVStore: cannot recover during a transaction");
+    RecoveryReport rep;
+
+    std::vector<LogRecord> log = wal_->readAll();
+    size_t start = 0;                                    // replay from the last checkpoint
+    for (size_t i = log.size(); i-- > 0;)
+        if (log[i].type == LogType::CHECKPOINT) { start = i + 1; break; }
+    rep.recordsScanned = log.size() - start;
+
+    // ---- Analysis: who finished, who was still running, which keys were touched ----
+    std::unordered_set<uint64_t> seen, finished, touched;
+    for (size_t i = start; i < log.size(); i++) {
+        const LogRecord& r = log[i];
+        switch (r.type) {
+            case LogType::BEGIN:  seen.insert(r.txnId); break;
+            case LogType::CHANGE: seen.insert(r.txnId); touched.insert(r.key); break;
+            case LogType::COMMIT: finished.insert(r.txnId); rep.committedTxns++; break;
+            case LogType::ABORT:  finished.insert(r.txnId); rep.abortedTxns++; break;
+            case LogType::CHECKPOINT: break;
+        }
+    }
+    std::vector<uint64_t> losers;
+    for (uint64_t t : seen) if (!finished.count(t)) losers.push_back(t);
+    std::sort(losers.begin(), losers.end(), std::greater<uint64_t>());   // newest first
+
+    // ---- Redo: repeat history. Drop every copy of the touched keys first (a crash
+    //      can leave a key in two pages), then replay all logged changes in order. ----
+    purgeKeys(touched);
+    for (size_t i = start; i < log.size(); i++) {
+        const LogRecord& r = log[i];
+        if (r.type != LogType::CHANGE) continue;
+        if (r.hasAfter) applyInsert(r.key, r.after);
+        else applyRemove(r.key);
+        rep.changesRedone++;
+    }
+
+    // ---- Undo: roll back transactions that never finished ----
+    for (uint64_t t : losers) {
+        std::vector<Change> mine;
+        for (size_t i = start; i < log.size(); i++) {
+            const LogRecord& r = log[i];
+            if (r.type == LogType::CHANGE && r.txnId == t)
+                mine.push_back(Change{r.key, r.hasBefore, r.before, r.hasAfter, r.after});
+        }
+        rollback(t, mine);
+        rep.changesUndone += mine.size();
+        rep.loserTxns++;
+    }
+
+    if (rep.recordsScanned > 0) checkpoint();            // make the recovered state durable
+    return rep;
 }

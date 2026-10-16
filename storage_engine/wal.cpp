@@ -132,3 +132,9 @@ std::vector<LogRecord> Wal::readAll() const {
     parse(readWholeFile(fd_), &recs);
     return recs;
 }
+
+
+void Wal::truncate() {
+    if (::ftruncate(fd_, 0) != 0) throw std::runtime_error("Wal: truncate failed");
+    if (::fsync(fd_) != 0) throw std::runtime_error("Wal: fsync failed");
+}

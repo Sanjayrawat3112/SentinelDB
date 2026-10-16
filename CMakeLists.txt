@@ -20,3 +20,5 @@ target_include_directories(wal_tests PRIVATE ${CMAKE_SOURCE_DIR})
 
 add_executable(kv_wal_tests pager.cpp buffer_pool.cpp storage_engine/page_ops.cpp storage_engine/kv_store.cpp storage_engine/wal.cpp storage_engine/test_kv_wal.cpp)
 target_include_directories(kv_wal_tests PRIVATE ${CMAKE_SOURCE_DIR})
+add_executable(recovery_tests pager.cpp buffer_pool.cpp storage_engine/page_ops.cpp storage_engine/kv_store.cpp storage_engine/wal.cpp storage_engine/test_recovery.cpp)
+target_include_directories(recovery_tests PRIVATE ${CMAKE_SOURCE_DIR})

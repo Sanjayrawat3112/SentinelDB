@@ -4,12 +4,23 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 class BufferPool;
 class Wal;
 
 constexpr size_t MAX_VALUE_SIZE = 1000;   // bytes; a record must fit inside a 4096-byte page
+
+// What recover() found and did (handy for the crash demo).
+struct RecoveryReport {
+    size_t recordsScanned = 0;   // log records after the last checkpoint
+    size_t committedTxns = 0;
+    size_t abortedTxns = 0;
+    size_t loserTxns = 0;        // were still running at the crash: rolled back
+    size_t changesRedone = 0;
+    size_t changesUndone = 0;
+};
 
 // Hash-based key-value store. Page = bucket, linear probing on overflow.
 // numPages must equal the totalPages given to the BufferPool.
@@ -53,7 +64,26 @@ public:
     void abort();
     bool inTransaction() const { return activeTxn_ != 0; }
 
+    // ---- Checkpoint and crash recovery (need enableWal) ----
+
+    // Flushes every dirty page to the data file, then empties the log down to a
+    // single CHECKPOINT record. Not allowed while a transaction is active.
+    void checkpoint();
+
+    // Call once at startup, right after enableWal(). Runs Analysis, Redo and Undo
+    // over the log and ends with a checkpoint. Safe to run again after a crash
+    // during recovery itself.
+    RecoveryReport recover();
+
 private:
+    struct Change {                 // what one change did, kept so abort() can undo it
+        uint64_t key;
+        bool hasBefore;
+        std::string before;
+        bool hasAfter;
+        std::string after;
+    };
+
     // Page-level work with no logging.
     size_t find(uint64_t key, std::string& outValue);
     bool place(uint64_t key, const std::string& value);
@@ -65,14 +95,8 @@ private:
     bool loggedChange(uint64_t key, bool hasBefore, const std::string& before,
                       bool hasAfter, const std::string& after);
     void requireWal() const;
-
-    struct Change {                 // what one change did, kept so abort() can undo it
-        uint64_t key;
-        bool hasBefore;
-        std::string before;
-        bool hasAfter;
-        std::string after;
-    };
+    void rollback(uint64_t txnId, const std::vector<Change>& changes);
+    void purgeKeys(const std::unordered_set<uint64_t>& keys);
 
     BufferPool& pool_;
     size_t numPages_;

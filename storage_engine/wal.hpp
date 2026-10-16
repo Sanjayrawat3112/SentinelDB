@@ -46,6 +46,9 @@ public:
     // Reads every valid record from the start of the file.
     std::vector<LogRecord> readAll() const;
 
+        // Empties the log (used right after a checkpoint). LSNs keep counting up.
+    void truncate();
+    
         // The LSN the next append() will get.
     uint64_t nextLsn() const { return nextLsn_; }
 
