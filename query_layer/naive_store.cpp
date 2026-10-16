@@ -26,7 +26,7 @@ size_t homePageOf(uint64_t key, size_t numPages) {   // identical to KVStore::ho
 }
 } // namespace
 
-NaiveStore::NaiveStore(const char* filePath, size_t numPages) : fd_(-1), numPages_(numPages) {
+NaiveStore::NaiveStore(const char* filePath, size_t numPages, bool syncWrites) : fd_(-1), numPages_(numPages), sync_(syncWrites) {
     fd_ = open(filePath, O_RDWR | O_CREAT, 0644);
     if (fd_ < 0) throw std::runtime_error("NaiveStore: open failed");
     struct stat st;
@@ -62,7 +62,7 @@ bool NaiveStore::insert(uint64_t key, const std::string& value) {
         size_t id = (home + i) % numPages_;
         readPage(fd_, id, buf);
         if (static_cast<PageHeader*>(static_cast<void*>(buf))->pageType == PAGE_FREE) pageInit(buf);
-        if (pageInsert(buf, key, value)) { writePage(fd_, id, buf); return true; }
+        if (pageInsert(buf, key, value)) { writePage(fd_, id, buf); if (sync_) fsync(fd_); return true; }
         pageSetOverflowed(buf);
         writePage(fd_, id, buf);
     }
@@ -96,6 +96,7 @@ bool NaiveStore::remove(uint64_t key) {
         if (pageGet(buf, key, tmp)) {
             pageRemove(buf, key);
             writePage(fd_, id, buf);
+            if (sync_) fsync(fd_);
             return true;
         }
         if (!pageIsOverflowed(buf)) break;

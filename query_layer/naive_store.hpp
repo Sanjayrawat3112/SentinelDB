@@ -10,7 +10,7 @@ constexpr size_t NAIVE_MAX_VALUE_SIZE = 1000;
 
 class NaiveStore {
 public:
-    NaiveStore(const char* filePath, size_t numPages);
+    NaiveStore(const char* filePath, size_t numPages, bool syncWrites = false);
     ~NaiveStore();
 
     bool insert(uint64_t key, const std::string& value);
@@ -21,4 +21,5 @@ public:
 private:
     int fd_;
     size_t numPages_;
+    bool sync_;
 };
