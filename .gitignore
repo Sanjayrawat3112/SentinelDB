@@ -2,3 +2,4 @@ build/
 disk.img
 *.img
 *.log
+.venv/

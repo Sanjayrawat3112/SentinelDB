@@ -1,0 +1,16 @@
+engine,workload,capacity,seed,seconds,ops_per_sec,p50_us,p99_us,hits,misses,evictions
+naive,mixed_durable,0,1,87.418968,22.9,18.41,27926.58,0,0,0
+sentinel,mixed_durable,256,1,5.588923,357.9,36.12,11697.26,2398,1291,1291
+sentinel,mixed_durable,1024,1,14.982769,133.5,2.89,52939.44,3689,0,0
+naive,mixed_durable,0,2,2.668613,749.5,12.92,6080.37,0,0,0
+sentinel,mixed_durable,256,2,5.425244,368.6,39.46,11613.31,2481,1307,1307
+sentinel,mixed_durable,1024,2,5.476088,365.2,2.87,11393.01,3788,0,0
+naive,mixed_durable,0,3,3.161356,632.6,14.66,7662.45,0,0,0
+sentinel,mixed_durable,256,3,5.733657,348.8,43.62,12306.79,2543,1272,1272
+sentinel,mixed_durable,1024,3,5.779517,346.0,2.60,11175.82,3815,0,0
+naive,mixed_durable,0,4,2.545778,785.6,3.92,6274.86,0,0,0
+sentinel,mixed_durable,256,4,4.796731,417.0,36.08,11237.04,2368,1297,1297
+sentinel,mixed_durable,1024,4,5.246748,381.2,2.10,11397.01,3665,0,0
+naive,mixed_durable,0,5,2.055630,972.9,3.77,5506.78,0,0,0
+sentinel,mixed_durable,256,5,13.795078,145.0,33.02,50173.90,2413,1276,1276
+sentinel,mixed_durable,1024,5,4.544677,440.1,2.12,9867.81,3689,0,0
